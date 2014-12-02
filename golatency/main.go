@@ -7,14 +7,14 @@ import (
 	"os"
 	"time"
 
-	//"github.com/dustin/go-humanize"
+	//"github.com/dmstin/go-humanize"
 	"github.com/kelseyhightower/envconfig"
 	"github.com/rcrowley/go-metrics"
 	//"github.com/codahale/metrics"
 	"github.com/therealbill/libredis/client"
 )
 
-// LaunchConfig is the configuration used by the main app
+// LaunchConfig is the configuration msed by the main app
 type LaunchConfig struct {
 	RedisConnectionString string
 	RedisAuthToken        string
@@ -50,7 +50,7 @@ func doTest(conn *client.Redis) {
 	h := metrics.Get("latency:full").(metrics.Histogram)
 	cstart := time.Now()
 	conn.Ping()
-	elapsed := int64(time.Since(cstart).Nanoseconds() / 1000)
+	elapsed := int64(time.Since(cstart) / time.Millisecond)
 	h.Update(elapsed)
 }
 
@@ -70,15 +70,15 @@ func directLatencyTest() {
 	}
 	snap := h.Snapshot()
 	avg := snap.Sum() / int64(iterations)
-	fmt.Printf("%d iterations over %dus, average %dus/operation\n", iterations, snap.Sum()/1000.0, avg)
+	fmt.Printf("%d iterations over %dms, average %dms/operation\n", iterations, snap.Sum()/1000.0, avg)
 	buckets := []float64{0.99, 0.95, 0.9, 0.75, 0.5}
 	dist := snap.Percentiles(buckets)
 	println("\nPercentile breakout:")
 	println("====================")
 	for i, b := range buckets {
-		fmt.Printf("%.2f%%: %.2fus\n", b*100, dist[i])
+		fmt.Printf("%.2f%%: %.2fms\n", b*100, dist[i])
 	}
-	fmt.Printf("\nMin: %dus; Max: %dus; Mean: %.2fus; StdDev: %.2fus\n", snap.Min(), snap.Max(), snap.Mean(), snap.StdDev())
+	fmt.Printf("\nMin: %dms; Max: %dms; Mean: %.2fms; StdDev: %.2fms\n", snap.Min(), snap.Max(), snap.Mean(), snap.StdDev())
 	println("\n\n")
 	metrics.WriteJSONOnce(metrics.DefaultRegistry, os.Stderr)
 
