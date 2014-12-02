@@ -5,7 +5,6 @@ import (
 	"log"
 	"log/syslog"
 	"os"
-
 	"time"
 
 	//"github.com/dustin/go-humanize"
@@ -43,17 +42,16 @@ func init() {
 		logger.Warning(err.Error())
 	}
 	if config.Iterations == 0 {
-		config.Iterations = 100000
+		config.Iterations = 1000
 	}
-	/*
-		sconfig.ManagedPodConfigs = make(map[string]SentinelPodConfig)
-		if config.SentinelConfigFile == "" {
-			config.SentinelConfigFile = "/etc/redis/sentinel.conf"
-		}
-		if config.LatencyThreshold == 0 {
-			config.LatencyThreshold = 50
-		}
-	*/
+}
+
+func doTest(conn *client.Redis) {
+	h := metrics.Get("latency:full").(metrics.Histogram)
+	cstart := time.Now()
+	conn.Ping()
+	elapsed := int64(time.Since(cstart).Nanoseconds() / 1000)
+	h.Update(elapsed)
 }
 
 func directLatencyTest() {
@@ -67,20 +65,9 @@ func directLatencyTest() {
 	s := metrics.NewUniformSample(iterations)
 	h := metrics.NewHistogram(s)
 	metrics.Register("latency:full", h)
-	//w, _ := syslog.Dial("unixgram", "/dev/log", syslog.LOG_INFO, "metrics")
-	//go metrics.Syslog(metrics.DefaultRegistry, time.Millisecond*3000, w)
-
-	//go metrics.WriteJSON(metrics.DefaultRegistry, time.Millisecond*1000, os.Stderr)
-	//loopstart := time.Now()
 	for i := 1; i <= iterations; i++ {
-		cstart := time.Now()
-		conn.Ping()
-		elapsed := int64(time.Since(cstart).Nanoseconds() / 1000)
-		h.Update(elapsed)
+		doTest(conn)
 	}
-	//loopelapsed := time.Since(loopstart).Nanoseconds()
-	//duration_us := loopelapsed / 1000.0
-	//avg_us := float64(avg / 1000.0)
 	snap := h.Snapshot()
 	avg := snap.Sum() / int64(iterations)
 	fmt.Printf("%d iterations over %dus, average %dus/operation\n", iterations, snap.Sum()/1000.0, avg)
