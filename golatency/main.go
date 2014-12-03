@@ -8,14 +8,14 @@ import (
 	"strings"
 	"time"
 
-	//"github.com/dustin/go-humanize"
+	//"github.com/dmstin/go-humanize"
 	"github.com/kelseyhightower/envconfig"
 	"github.com/rcrowley/go-metrics"
 	"github.com/therealbill/libredis/client"
 	"gopkg.in/mgo.v2"
 )
 
-// LaunchConfig is the configuration used by the main app
+// LaunchConfig is the configuration msed by the main app
 type LaunchConfig struct {
 	RedisConnectionString string
 	RedisAuthToken        string
@@ -43,9 +43,9 @@ type Node struct {
 
 type TestStatsEntry struct {
 	Hist      map[string]float64
-	Max       int64
+	Max       float64
 	Mean      float64
-	Min       int64
+	Min       float64
 	Jitter    float64
 	Timestamp int64
 	Name      string
@@ -62,16 +62,18 @@ func init() {
 		logger.Warning(err.Error())
 	}
 	if config.Iterations == 0 {
-		config.Iterations = 100000
+		config.Iterations = 1000
 	}
 	if config.UseMongo || config.MongoConnString > "" {
 		fmt.Println("Mongo storage enabled")
 		mongotargets := strings.Split(config.MongoConnString, ",")
 		fmt.Printf("targets: %+v\n", mongotargets)
 		fmt.Print("connecting to mongo...")
+		fmt.Printf("%s -- %s\n", config.MongoUsername, config.MongoPassword)
 		var err error
-		session, err = mgo.DialWithInfo(&mgo.DialInfo{Addrs: mongotargets, Username: "latstore", Password: "latstorepass", Database: "redislatency"})
+		session, err = mgo.DialWithInfo(&mgo.DialInfo{Addrs: mongotargets, Username: config.MongoUsername, Password: config.MongoPassword, Database: config.MongoDBName})
 		if err != nil {
+			config.UseMongo = false
 			panic(err)
 		}
 		fmt.Println("done")
@@ -81,27 +83,31 @@ func init() {
 	}
 }
 
+func doTest(conn *client.Redis) {
+	h := metrics.Get("latency:full").(metrics.Histogram)
+	cstart := time.Now()
+	conn.Ping()
+	elapsed := int64(time.Since(cstart).Nanoseconds())
+	h.Update(elapsed / 1e6)
+}
+
 func main() {
 	iterations := config.Iterations
 	conn, err := client.DialWithConfig(&client.DialConfig{Address: config.RedisConnectionString, Password: config.RedisAuthToken})
 	if err != nil {
-		logger.Warning("Unable to connect to instance: " + err.Error())
+		logger.Warning("Unable to connect to instance '" + config.RedisConnectionString + "': " + err.Error())
 		log.Fatal("No connection, aborting run.")
 	}
 	fmt.Println("Connected to " + config.RedisConnectionString)
 	s := metrics.NewUniformSample(iterations)
 	h := metrics.NewHistogram(s)
 	metrics.Register("latency:full", h)
-
 	for i := 1; i <= iterations; i++ {
-		cstart := time.Now()
-		conn.Ping()
-		elapsed := int64(time.Since(cstart).Nanoseconds() / 1000)
-		h.Update(elapsed)
+		doTest(conn)
 	}
 	snap := h.Snapshot()
 	avg := snap.Sum() / int64(iterations)
-	fmt.Printf("%d iterations over %dus, average %dus/operation\n", iterations, snap.Sum()/1000.0, avg)
+	fmt.Printf("%d iterations over %s, average %s/operation\n", iterations, time.Duration(snap.Sum()*1e6), time.Duration(avg*1e6))
 	buckets := []float64{0.99, 0.95, 0.9, 0.75, 0.5}
 	dist := snap.Percentiles(buckets)
 	println("\nPercentile breakout:")
@@ -110,18 +116,23 @@ func main() {
 	result.Hist = make(map[string]float64)
 	result.Name = "test run"
 	result.Timestamp = time.Now().Unix()
+	min := time.Duration(snap.Min() * 1e6)
+	max := time.Duration(snap.Max() * 1e6)
+	mean := time.Duration(snap.Mean() * 1e6)
+	stddev := time.Duration(snap.StdDev() * 1e6)
+	fmt.Printf("\nMin: %s\nMax: %s\nMean: %s\nJitter: %s\n", min, max, mean, stddev)
 	for i, b := range buckets {
-		fmt.Printf("%.2f%%: %.2fus\n", b*100, dist[i])
+		d := time.Duration(dist[i] * 1e6)
+		fmt.Printf("%.2f%%: %v\n", b*100, d)
 		bname := fmt.Sprintf("%.2f", b*100)
 		result.Hist[bname] = dist[i]
 	}
-	fmt.Printf("\nMin: %dus; Max: %dus; Mean: %.2fus; StdDev: %.2fus\n", snap.Min(), snap.Max(), snap.Mean(), snap.StdDev())
 
-	result.Max = snap.Max()
+	result.Max = float64(snap.Max())
 	result.Mean = snap.Mean()
-	result.Min = snap.Min()
+	result.Min = float64(snap.Min())
 	result.Jitter = snap.StdDev()
-	result.Unit = "us"
+	result.Unit = "ms"
 	println("\n\n")
 	metrics.WriteJSONOnce(metrics.DefaultRegistry, os.Stderr)
 	if config.UseMongo {
@@ -132,7 +143,7 @@ func main() {
 		}
 		println("\nReading dataz from mongo...")
 		var previousResults []TestStatsEntry
-		iter := coll.Find(nil).Limit(100).Sort("Timestamp").Iter()
+		iter := coll.Find(nil).Limit(5).Sort("-Timestamp").Iter()
 		err = iter.All(&previousResults)
 		if err != nil {
 			println(err)
@@ -143,5 +154,4 @@ func main() {
 		}
 		session.Close()
 	}
-
 }
