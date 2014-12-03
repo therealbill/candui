@@ -88,7 +88,7 @@ func doTest(conn *client.Redis) {
 	cstart := time.Now()
 	conn.Ping()
 	elapsed := int64(time.Since(cstart).Nanoseconds())
-	h.Update(elapsed / 1e6)
+	h.Update(elapsed)
 }
 
 func main() {
@@ -107,7 +107,7 @@ func main() {
 	}
 	snap := h.Snapshot()
 	avg := snap.Sum() / int64(iterations)
-	fmt.Printf("%d iterations over %s, average %s/operation\n", iterations, time.Duration(snap.Sum()*1e6), time.Duration(avg*1e6))
+	fmt.Printf("%d iterations over %s, average %s/operation\n", iterations, time.Duration(snap.Sum()), time.Duration(avg))
 	buckets := []float64{0.99, 0.95, 0.9, 0.75, 0.5}
 	dist := snap.Percentiles(buckets)
 	println("\nPercentile breakout:")
@@ -116,13 +116,13 @@ func main() {
 	result.Hist = make(map[string]float64)
 	result.Name = "test run"
 	result.Timestamp = time.Now().Unix()
-	min := time.Duration(snap.Min() * 1e6)
-	max := time.Duration(snap.Max() * 1e6)
-	mean := time.Duration(snap.Mean() * 1e6)
-	stddev := time.Duration(snap.StdDev() * 1e6)
+	min := time.Duration(snap.Min())
+	max := time.Duration(snap.Max())
+	mean := time.Duration(snap.Mean())
+	stddev := time.Duration(snap.StdDev())
 	fmt.Printf("\nMin: %s\nMax: %s\nMean: %s\nJitter: %s\n", min, max, mean, stddev)
 	for i, b := range buckets {
-		d := time.Duration(dist[i] * 1e6)
+		d := time.Duration(dist[i])
 		fmt.Printf("%.2f%%: %v\n", b*100, d)
 		bname := fmt.Sprintf("%.2f", b*100)
 		result.Hist[bname] = dist[i]
@@ -132,7 +132,7 @@ func main() {
 	result.Mean = snap.Mean()
 	result.Min = float64(snap.Min())
 	result.Jitter = snap.StdDev()
-	result.Unit = "ms"
+	result.Unit = "ns"
 	println("\n\n")
 	metrics.WriteJSONOnce(metrics.DefaultRegistry, os.Stderr)
 	if config.UseMongo {
@@ -143,7 +143,7 @@ func main() {
 		}
 		println("\nReading dataz from mongo...")
 		var previousResults []TestStatsEntry
-		iter := coll.Find(nil).Limit(5).Sort("-Timestamp").Iter()
+		iter := coll.Find(nil).Limit(25).Sort("-Timestamp").Iter()
 		err = iter.All(&previousResults)
 		if err != nil {
 			println(err)
