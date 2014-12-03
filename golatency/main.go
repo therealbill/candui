@@ -69,7 +69,6 @@ func init() {
 		mongotargets := strings.Split(config.MongoConnString, ",")
 		fmt.Printf("targets: %+v\n", mongotargets)
 		fmt.Print("connecting to mongo...")
-		fmt.Printf("%s -- %s\n", config.MongoUsername, config.MongoPassword)
 		var err error
 		session, err = mgo.DialWithInfo(&mgo.DialInfo{Addrs: mongotargets, Username: config.MongoUsername, Password: config.MongoPassword, Database: config.MongoDBName})
 		if err != nil {
