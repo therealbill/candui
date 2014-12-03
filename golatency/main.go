@@ -5,14 +5,14 @@ import (
 	"log"
 	"log/syslog"
 	"os"
-
+	"strings"
 	"time"
 
 	//"github.com/dustin/go-humanize"
 	"github.com/kelseyhightower/envconfig"
 	"github.com/rcrowley/go-metrics"
-	//"github.com/codahale/metrics"
 	"github.com/therealbill/libredis/client"
+	"gopkg.in/mgo.v2"
 )
 
 // LaunchConfig is the configuration used by the main app
@@ -22,6 +22,12 @@ type LaunchConfig struct {
 	SentinelConfigFile    string
 	LatencyThreshold      int
 	Iterations            int
+	MongoConnString       string
+	MongoDBName           string
+	MongoCollectionName   string
+	MongoUsername         string
+	MongoPassword         string
+	UseMongo              bool
 }
 
 var config LaunchConfig
@@ -35,6 +41,19 @@ type Node struct {
 	Connection *client.Redis
 }
 
+type TestStatsEntry struct {
+	Hist      map[string]float64
+	Max       int64
+	Mean      float64
+	Min       int64
+	Jitter    float64
+	Timestamp int64
+	Name      string
+	Unit      string
+}
+
+var session *mgo.Session
+
 func init() {
 	// initialize logging
 	logger, _ = syslog.New(syslog.LOG_INFO|syslog.LOG_DAEMON, "candui.golatency")
@@ -45,18 +64,24 @@ func init() {
 	if config.Iterations == 0 {
 		config.Iterations = 100000
 	}
-	/*
-		sconfig.ManagedPodConfigs = make(map[string]SentinelPodConfig)
-		if config.SentinelConfigFile == "" {
-			config.SentinelConfigFile = "/etc/redis/sentinel.conf"
+	if config.UseMongo || config.MongoConnString > "" {
+		fmt.Println("Mongo storage enabled")
+		mongotargets := strings.Split(config.MongoConnString, ",")
+		fmt.Printf("targets: %+v\n", mongotargets)
+		fmt.Print("connecting to mongo...")
+		var err error
+		session, err = mgo.DialWithInfo(&mgo.DialInfo{Addrs: mongotargets, Username: "latstore", Password: "latstorepass", Database: "redislatency"})
+		if err != nil {
+			panic(err)
 		}
-		if config.LatencyThreshold == 0 {
-			config.LatencyThreshold = 50
-		}
-	*/
+		fmt.Println("done")
+		// Optional. Switch the session to a monotonic behavior.
+		session.SetMode(mgo.Monotonic, true)
+		config.UseMongo = true
+	}
 }
 
-func directLatencyTest() {
+func main() {
 	iterations := config.Iterations
 	conn, err := client.DialWithConfig(&client.DialConfig{Address: config.RedisConnectionString, Password: config.RedisAuthToken})
 	if err != nil {
@@ -67,20 +92,13 @@ func directLatencyTest() {
 	s := metrics.NewUniformSample(iterations)
 	h := metrics.NewHistogram(s)
 	metrics.Register("latency:full", h)
-	//w, _ := syslog.Dial("unixgram", "/dev/log", syslog.LOG_INFO, "metrics")
-	//go metrics.Syslog(metrics.DefaultRegistry, time.Millisecond*3000, w)
 
-	//go metrics.WriteJSON(metrics.DefaultRegistry, time.Millisecond*1000, os.Stderr)
-	//loopstart := time.Now()
 	for i := 1; i <= iterations; i++ {
 		cstart := time.Now()
 		conn.Ping()
 		elapsed := int64(time.Since(cstart).Nanoseconds() / 1000)
 		h.Update(elapsed)
 	}
-	//loopelapsed := time.Since(loopstart).Nanoseconds()
-	//duration_us := loopelapsed / 1000.0
-	//avg_us := float64(avg / 1000.0)
 	snap := h.Snapshot()
 	avg := snap.Sum() / int64(iterations)
 	fmt.Printf("%d iterations over %dus, average %dus/operation\n", iterations, snap.Sum()/1000.0, avg)
@@ -88,15 +106,42 @@ func directLatencyTest() {
 	dist := snap.Percentiles(buckets)
 	println("\nPercentile breakout:")
 	println("====================")
+	var result TestStatsEntry
+	result.Hist = make(map[string]float64)
+	result.Name = "test run"
+	result.Timestamp = time.Now().Unix()
 	for i, b := range buckets {
 		fmt.Printf("%.2f%%: %.2fus\n", b*100, dist[i])
+		bname := fmt.Sprintf("%.2f", b*100)
+		result.Hist[bname] = dist[i]
 	}
 	fmt.Printf("\nMin: %dus; Max: %dus; Mean: %.2fus; StdDev: %.2fus\n", snap.Min(), snap.Max(), snap.Mean(), snap.StdDev())
+
+	result.Max = snap.Max()
+	result.Mean = snap.Mean()
+	result.Min = snap.Min()
+	result.Jitter = snap.StdDev()
+	result.Unit = "us"
 	println("\n\n")
 	metrics.WriteJSONOnce(metrics.DefaultRegistry, os.Stderr)
+	if config.UseMongo {
+		coll := session.DB(config.MongoDBName).C(config.MongoCollectionName)
+		coll.Insert(&result)
+		if err != nil {
+			log.Fatal(err)
+		}
+		println("\nReading dataz from mongo...")
+		var previousResults []TestStatsEntry
+		iter := coll.Find(nil).Limit(100).Sort("Timestamp").Iter()
+		err = iter.All(&previousResults)
+		if err != nil {
+			println(err)
+		}
+		for _, test := range previousResults {
+			fmt.Printf("%+v\n", test)
+			println()
+		}
+		session.Close()
+	}
 
-}
-
-func main() {
-	directLatencyTest()
 }
