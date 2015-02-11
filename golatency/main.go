@@ -56,8 +56,8 @@ var session *mgo.Session
 
 func init() {
 	// initialize logging
-	logger, _ = syslog.New(syslog.LOG_INFO|syslog.LOG_DAEMON, "candui.golatency")
-	err := envconfig.Process("candui", &config)
+	logger, _ = syslog.New(syslog.LOG_INFO|syslog.LOG_DAEMON, "golatency")
+	err := envconfig.Process("golatency", &config)
 	if err != nil {
 		logger.Warning(err.Error())
 	}
