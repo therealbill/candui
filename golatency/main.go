@@ -58,12 +58,11 @@ var session *mgo.Session
 func init() {
 	// initialize logging
 	logger, err := syslog.New(syslog.LOG_INFO|syslog.LOG_DAEMON, "golatency")
-	if err != nil {
-		fmt.Printf("Unable to connect to syslog, err: %s", err.Error())
-	}
 	err = envconfig.Process("golatency", &config)
 	if err != nil {
-		logger.Warning(err.Error())
+		if logger != nil {
+			logger.Warning(err.Error())
+		}
 	}
 	if config.Iterations == 0 {
 		config.Iterations = 1000
