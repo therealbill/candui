@@ -28,6 +28,7 @@ type LaunchConfig struct {
 	MongoUsername         string
 	MongoPassword         string
 	UseMongo              bool
+	JSONOut               bool
 }
 
 var config LaunchConfig
@@ -56,8 +57,11 @@ var session *mgo.Session
 
 func init() {
 	// initialize logging
-	logger, _ = syslog.New(syslog.LOG_INFO|syslog.LOG_DAEMON, "golatency")
-	err := envconfig.Process("golatency", &config)
+	logger, err := syslog.New(syslog.LOG_INFO|syslog.LOG_DAEMON, "golatency")
+	if err != nil {
+		fmt.Printf("Unable to connect to syslog, err: %s", err.Error())
+	}
+	err = envconfig.Process("golatency", &config)
 	if err != nil {
 		logger.Warning(err.Error())
 	}
@@ -94,10 +98,12 @@ func main() {
 	iterations := config.Iterations
 	conn, err := client.DialWithConfig(&client.DialConfig{Address: config.RedisConnectionString, Password: config.RedisAuthToken})
 	if err != nil {
-		logger.Warning("Unable to connect to instance '" + config.RedisConnectionString + "': " + err.Error())
+		if logger != nil {
+			logger.Warning("Unable to connect to instance '" + config.RedisConnectionString + "': " + err.Error())
+		}
 		log.Fatal("No connection, aborting run.")
 	}
-	fmt.Println("Connected to " + config.RedisConnectionString)
+	//fmt.Println("Connected to " + config.RedisConnectionString)
 	s := metrics.NewUniformSample(iterations)
 	h := metrics.NewHistogram(s)
 	metrics.Register("latency:full", h)
@@ -106,11 +112,15 @@ func main() {
 	}
 	snap := h.Snapshot()
 	avg := snap.Sum() / int64(iterations)
-	fmt.Printf("%d iterations over %s, average %s/operation\n", iterations, time.Duration(snap.Sum()), time.Duration(avg))
+	if !config.JSONOut {
+		fmt.Printf("%d iterations over %s, average %s/operation\n", iterations, time.Duration(snap.Sum()), time.Duration(avg))
+	}
 	buckets := []float64{0.99, 0.95, 0.9, 0.75, 0.5}
 	dist := snap.Percentiles(buckets)
-	println("\nPercentile breakout:")
-	println("====================")
+	if !config.JSONOut {
+		println("\nPercentile breakout:")
+		println("====================")
+	}
 	var result TestStatsEntry
 	result.Hist = make(map[string]float64)
 	result.Name = "test run"
@@ -119,10 +129,14 @@ func main() {
 	max := time.Duration(snap.Max())
 	mean := time.Duration(snap.Mean())
 	stddev := time.Duration(snap.StdDev())
-	fmt.Printf("\nMin: %s\nMax: %s\nMean: %s\nJitter: %s\n", min, max, mean, stddev)
+	if !config.JSONOut {
+		fmt.Printf("\nMin: %s\nMax: %s\nMean: %s\nJitter: %s\n", min, max, mean, stddev)
+	}
 	for i, b := range buckets {
 		d := time.Duration(dist[i])
-		fmt.Printf("%.2f%%: %v\n", b*100, d)
+		if !config.JSONOut {
+			fmt.Printf("%.2f%%: %v\n", b*100, d)
+		}
 		bname := fmt.Sprintf("%.2f", b*100)
 		result.Hist[bname] = dist[i]
 	}
@@ -132,8 +146,11 @@ func main() {
 	result.Min = float64(snap.Min())
 	result.Jitter = snap.StdDev()
 	result.Unit = "ns"
-	println("\n\n")
-	metrics.WriteJSONOnce(metrics.DefaultRegistry, os.Stderr)
+	if config.JSONOut {
+		metrics.WriteJSONOnce(metrics.DefaultRegistry, os.Stdout)
+	} else {
+		println("\n\n")
+	}
 	if config.UseMongo {
 		coll := session.DB(config.MongoDBName).C(config.MongoCollectionName)
 		coll.Insert(&result)
