@@ -145,7 +145,7 @@ func main() {
 	//results := make( map[string]interface )
 	//results['data'] = metrics.MarshallJSON(metrics.DefaultRegistry)
 	if !config.JSONOut {
-		fmt.Printf("%d iterations across %x clients took %s, average %s/operation\n", iterations*config.ClientCount, config.ClientCount, time.Duration(snap.Sum()), time.Duration(avg))
+		fmt.Printf("%d iterations across %d clients took %s, average %s/operation\n", iterations*config.ClientCount, c.Count(), time.Duration(snap.Sum()), time.Duration(avg))
 	}
 	buckets := []float64{0.99, 0.95, 0.9, 0.75, 0.5}
 	dist := snap.Percentiles(buckets)
