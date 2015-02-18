@@ -22,6 +22,7 @@ type LaunchConfig struct {
 	SentinelConfigFile    string
 	LatencyThreshold      int
 	Iterations            int
+	ClientCount           int
 	MongoConnString       string
 	MongoDBName           string
 	MongoCollectionName   string
@@ -32,6 +33,8 @@ type LaunchConfig struct {
 }
 
 var config LaunchConfig
+
+var dchan chan int
 
 // Syslog logging
 var logger *syslog.Writer
@@ -67,6 +70,10 @@ func init() {
 	if config.Iterations == 0 {
 		config.Iterations = 1000
 	}
+	if config.ClientCount == 0 {
+		config.ClientCount = 1
+	}
+	dchan = make(chan int)
 	if config.UseMongo || config.MongoConnString > "" {
 		fmt.Println("Mongo storage enabled")
 		mongotargets := strings.Split(config.MongoConnString, ",")
@@ -93,9 +100,22 @@ func doTest(conn *client.Redis) {
 	h.Update(elapsed)
 }
 
+func testLatency() {
+	tconn, err := client.DialWithConfig(&client.DialConfig{Address: config.RedisConnectionString, Password: config.RedisAuthToken})
+	for i := 1; i <= config.Iterations; i++ {
+		if err != nil {
+			log.Print("Error on connection, client bailing:", err)
+			break
+		}
+		doTest(tconn)
+	}
+	dchan <- 1
+
+}
+
 func main() {
 	iterations := config.Iterations
-	conn, err := client.DialWithConfig(&client.DialConfig{Address: config.RedisConnectionString, Password: config.RedisAuthToken})
+	_, err := client.DialWithConfig(&client.DialConfig{Address: config.RedisConnectionString, Password: config.RedisAuthToken})
 	if err != nil {
 		if logger != nil {
 			logger.Warning("Unable to connect to instance '" + config.RedisConnectionString + "': " + err.Error())
@@ -106,9 +126,17 @@ func main() {
 	s := metrics.NewUniformSample(iterations)
 	h := metrics.NewHistogram(s)
 	metrics.Register("latency:full", h)
-	for i := 1; i <= iterations; i++ {
-		doTest(conn)
+
+	for client := 1; client <= config.ClientCount; client++ {
+		go testLatency()
 	}
+	for x := 1; x <= config.ClientCount; x++ {
+		select {
+		case res := <-dchan:
+			_ = res
+		}
+	}
+
 	snap := h.Snapshot()
 	avg := snap.Sum() / int64(iterations)
 	if !config.JSONOut {
