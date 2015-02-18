@@ -126,9 +126,12 @@ func main() {
 	s := metrics.NewUniformSample(iterations)
 	h := metrics.NewHistogram(s)
 	metrics.Register("latency:full", h)
+	c := metrics.NewCounter()
+	metrics.Register("clients", c)
 
 	for client := 1; client <= config.ClientCount; client++ {
 		go testLatency()
+		c.Inc(1)
 	}
 	for x := 1; x <= config.ClientCount; x++ {
 		select {
@@ -139,8 +142,10 @@ func main() {
 
 	snap := h.Snapshot()
 	avg := snap.Sum() / int64(iterations)
+	//results := make( map[string]interface )
+	//results['data'] = metrics.MarshallJSON(metrics.DefaultRegistry)
 	if !config.JSONOut {
-		fmt.Printf("%d iterations over %s, average %s/operation\n", iterations, time.Duration(snap.Sum()), time.Duration(avg))
+		fmt.Printf("%d iterations across %x clients took %s, average %s/operation\n", iterations*config.ClientCount, config.ClientCount, time.Duration(snap.Sum()), time.Duration(avg))
 	}
 	buckets := []float64{0.99, 0.95, 0.9, 0.75, 0.5}
 	dist := snap.Percentiles(buckets)
@@ -176,6 +181,9 @@ func main() {
 	if config.JSONOut {
 		metrics.WriteJSONOnce(metrics.DefaultRegistry, os.Stdout)
 	} else {
+		println("\n\n")
+		metrics.WriteJSONOnce(metrics.DefaultRegistry, os.Stdout)
+		//printfmt.Printf("%+v\n", data)
 		println("\n\n")
 	}
 	if config.UseMongo {
