@@ -4,16 +4,26 @@ Quick and dirty during early exploration development.
 
 Environment variables:
 ```
-CANDUI_ITERATIONS=100
-CANDUI_REDISAUTHTOKEN=<auth>
-CANDUI_REDISCONNECTIONSTRING=<host:port>
+GOLATENCY_ITERATIONS=100
+GOLATENCY_JSONOUT=FALSE
+GOLATENCY_REDISAUTHTOKEN=<auth>
+GOLATENCY_REDISCONNECTIONSTRING=<host:port>
 ```
+
+If GOLATENCY_JSONOUT is set to true, only the JSON output will be printed to
+stdout.
+
 
 If storing results in mongo: 
 ```
-CANDUI_MONGOCOLLECTIONNAME=<name>
-CANDUI_MONGOCONNSTRING=<connstring>
-CANDUI_MONGODBNAME=<dbname>
-CANDUI_MONGOUSERNAME=<username>
-CANDUI_MONGOPASSWORD=<password>
+GOLATENCY_MONGOCOLLECTIONNAME=<name>
+GOLATENCY_MONGOCONNSTRING=<connstring>
+GOLATENCY_MONGODBNAME=<dbname>
+GOLATENCY_MONGOUSERNAME=<username>
+GOLATENCY_MONGOPASSWORD=<password>
 ```
+
+
+# Results
+The latency numbers are in nanoseconds, and represent the point of view of the
+client. As such it includes networking.
